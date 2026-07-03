@@ -1,0 +1,24 @@
+{
+  "name": "@jy-aigc/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@jy-aigc/db": "workspace:*",
+    "@jy-aigc/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@jy-aigc/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
