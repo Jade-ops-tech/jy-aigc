@@ -1,11 +1,13 @@
 # Dependencies
 node_modules
+.pnpm-store
 .pnp
 .pnp.js
 
 # Build outputs
 dist
 build
+.aws-sam
 *.tsbuildinfo
 
 # Generated files
@@ -14,6 +16,11 @@ apps/web/src/routeTree.gen.ts
 # Environment variables
 .env
 .env*.local
+apps/server/.env
+
+# Local Codex configuration
+.codex/config.toml
+.codex/hooks.json
 
 # IDEs and editors
 .vscode/*

@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Daily Musings API and private Lambda networking for an existing PostgreSQL database.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: "[a-z0-9-]+"
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:3001
+    Description: Exact frontend origin allowed by CORS and Better Auth.
+  ExistingVpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-0c371f0627eb1893e
+    Description: VPC containing the existing Aurora PostgreSQL cluster.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-0057bf68a587eaa1e
+    Description: Existing public subnet used only by the NAT Gateway.
+  ExistingDatabaseSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-067767baaeddf9ca8
+  PrivateSubnetACidr:
+    Type: String
+    Default: 172.31.64.0/24
+  PrivateSubnetBCidr:
+    Type: String
+    Default: 172.31.65.0/24
+  DatabaseEndpoint:
+    Type: String
+    Default: database-1.cluster-cn0uke2ukzuo.us-west-2.rds.amazonaws.com
+  DatabasePort:
+    Type: Number
+    Default: 5432
+  DatabaseName:
+    Type: String
+    Default: postgres
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]+"
+  DatabaseUsername:
+    Type: String
+    Default: postgres
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+    Description: Password for the existing Aurora PostgreSQL user.
+  GithubTokenEncryptionKey:
+    Type: String
+    NoEcho: true
+    MinLength: 44
+    Description: Existing vN:base64-32B keyring or a single base64-32B key.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - arm64
+    MemorySize: 512
+    Tracing: Active
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref LambdaSecurityGroup
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+    Environment:
+      Variables:
+        DATABASE_HOST: !Ref DatabaseEndpoint
+        DATABASE_NAME: !Ref DatabaseName
+        DATABASE_PASSWORD: !Ref DatabasePassword
+        DATABASE_POOL_MAX: "2"
+        DATABASE_PORT: !Ref DatabasePort
+        DATABASE_USER: !Ref DatabaseUsername
+        NODE_ENV: production
+
+Resources:
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Ref PrivateSubnetACidr
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref ExistingVpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-a"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Ref PrivateSubnetBCidr
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref ExistingVpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-b"
+
+  NatElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatElasticIp.AllocationId
+      SubnetId: !Ref PublicSubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat"
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-routes"
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetA
+
+  PrivateRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnetB
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Outbound access for Daily Musings Lambda functions.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref ExistingVpcId
+
+  DatabaseIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Allow the SAM Lambda functions to reach the existing Aurora cluster.
+      FromPort: !Ref DatabasePort
+      GroupId: !Ref ExistingDatabaseSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      ToPort: !Ref DatabasePort
+
+  BetterAuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub "${AWS::StackName} Better Auth signing secret"
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: secret
+        PasswordLength: 64
+        SecretStringTemplate: "{}"
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowCredentials: true
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowOrigins:
+          - !Ref FrontendOrigin
+
+  MigrationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - PrivateDefaultRoute
+    Properties:
+      CodeUri: apps/server/dist/
+      Handler: migrate.handler
+      Timeout: 300
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
+
+  DatabaseMigrations:
+    Type: Custom::DatabaseMigrations
+    Properties:
+      ServiceToken: !GetAtt MigrationFunction.Arn
+      MigrationVersion: "0001"
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DatabaseMigrations
+    Properties:
+      CodeUri: apps/server/dist/
+      Handler: lambda.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          BETTER_AUTH_SECRET: !Sub "{{resolve:secretsmanager:${BetterAuthSecret}:SecretString:secret}}"
+          CORS_ORIGIN: !Ref FrontendOrigin
+          GITHUB_TOKEN_ENCRYPTION_KEY: !Ref GithubTokenEncryptionKey
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: ANY
+            Path: /
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: ANY
+            Path: /{proxy+}
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
+
+Outputs:
+  ApiUrl:
+    Description: Public API Gateway base URL.
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+  ExistingDatabaseEndpoint:
+    Description: Existing Aurora cluster endpoint used by Lambda.
+    Value: !Ref DatabaseEndpoint
+  VpcId:
+    Value: !Ref ExistingVpcId

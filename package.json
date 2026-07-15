@@ -16,6 +16,7 @@
     "db:studio": "turbo run db:studio -F @jy-aigc/db",
     "db:generate": "turbo run db:generate -F @jy-aigc/db",
     "db:migrate": "turbo run db:migrate -F @jy-aigc/db",
+    "test": "turbo run test",
     "check": "ultracite check",
     "fix": "ultracite fix"
   },

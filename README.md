@@ -1,5 +1,7 @@
 # jy-aigc
 
+AWS 部署说明见 [docs/aws-sam-deployment.md](docs/aws-sam-deployment.md)。
+
 This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Router, Hono, TRPC, and more.
 
 ## Features
@@ -17,6 +19,9 @@ This project was created with [Better-T-Stack](https://github.com/AmanVarshney01
 - **Turborepo** - Optimized monorepo build system
 - **Biome** - Linting and formatting
 - **Starlight** - Documentation site with Astro
+- **Private journal** - Create, browse, edit, and soft-delete personal entries
+- **Draft recovery** - Throttled local draft persistence for new entries
+- **GitHub integration** - Encrypted multi-token storage and GitHub profile validation
 
 ## Getting Started
 
@@ -33,11 +38,15 @@ This project uses PostgreSQL with Drizzle ORM.
 1. Make sure you have a PostgreSQL database set up.
 2. Update your `apps/server/.env` file with your PostgreSQL connection details.
 
-3. Apply the schema to your database:
+3. Apply migrations to a new database:
 
 ```bash
-pnpm run db:push
+pnpm run db:migrate
 ```
+
+> The first migration is a full baseline. If the database was previously created
+> with `db:push`, inspect `drizzle.__drizzle_migrations` before migrating so the
+> baseline is not applied twice.
 
 Then, run the development server:
 
@@ -107,3 +116,6 @@ jy-aigc/
 - `pnpm run check`: Run Biome formatting and linting
 - `cd apps/docs && pnpm run dev`: Start documentation site
 - `cd apps/docs && pnpm run build`: Build documentation site
+
+The docs site uses `SITE_URL` as its public canonical URL and falls back to
+`http://localhost:4321` for local builds.

@@ -1,9 +1,19 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: "./src/index.ts",
-  format: "esm",
-  outDir: "./dist",
-  clean: true,
-  noExternal: [/@jy-aigc\/.*/],
+	entry: {
+		index: "./src/index.ts",
+		lambda: "./src/lambda.ts",
+		migrate: "./src/migrate.ts",
+	},
+	format: "esm",
+	loader: {
+		".sql": "text",
+	},
+	outDir: "./dist",
+	clean: true,
+	deps: {
+		alwaysBundle: [/@jy-aigc\/.*/, "pg"],
+		onlyBundle: false,
+	},
 });

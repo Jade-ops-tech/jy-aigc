@@ -1,39 +1,19 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
-hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
-  actions:
-    - text: Example Guide
-      link: /guides/example/
-      icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
-      icon: external
-      variant: minimal
+title: Daily Musings 工程文档
+description: 私密微型日记应用的开发、架构与运维说明。
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components";
+Daily Musings 是一个登录后使用的私密微型日记应用。用户可以记录、编辑、软删除日记，选择心情标签，并安全管理多个 GitHub Token 配置。
 
-## Next steps
+## 当前能力
 
-<CardGrid stagger>
-  <Card title="Update content" icon="pencil">
-    Edit `src/content/docs/index.mdx` to see this page change.
-  </Card>
-  <Card title="Change page layout" icon="document">
-    Delete `template: splash` in `src/content/docs/index.mdx` to display a sidebar on this page.
-  </Card>
-  <Card title="Add new content" icon="add-document">
-    Add Markdown or MDX files to `src/content/docs` to create new pages.
-  </Card>
-  <Card title="Configure your site" icon="setting">
-    Edit your `sidebar` and other config in `astro.config.mjs`.
-  </Card>
-  <Card title="Read the docs" icon="open-book">
-    Learn more in [the Starlight Docs](https://starlight.astro.build/).
-  </Card>
-</CardGrid>
+- 邮箱和密码登录，受保护路由统一校验 session。
+- 日记创建、倒序信息流、按天分组、编辑和软删除。
+- 新建日记草稿在浏览器本地节流保存。
+- GitHub Token 使用 AES-256-GCM 加密后存储，支持密钥版本轮换。
+- API 使用 tRPC，数据库使用 Drizzle ORM 和 Neon Postgres。
+
+## 从这里开始
+
+- [本地开发](/guides/example/)：环境变量、启动、测试和数据库命令。
+- [架构与安全](/reference/example/)：Monorepo 边界、数据隔离和密钥处理。

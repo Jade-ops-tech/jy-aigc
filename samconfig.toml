@@ -1,0 +1,10 @@
+version = 0.1
+
+[production.deploy.parameters]
+stack_name = "jy-aigc-production"
+resolve_s3 = true
+s3_prefix = "jy-aigc-production"
+region = "us-west-2"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+fail_on_empty_changeset = false

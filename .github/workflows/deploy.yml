@@ -1,0 +1,72 @@
+name: Deploy AWS SAM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Check types
+        run: pnpm check-types
+
+      - name: Build Lambda bundles
+        run: pnpm --filter server build
+
+      - name: Set up AWS SAM
+        uses: aws-actions/setup-sam@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Validate SAM template
+        run: sam validate --lint
+
+      - name: Build SAM application
+        run: sam build
+
+      - name: Deploy
+        run: >-
+          sam deploy
+          --config-env production
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
+          --parameter-overrides
+          DatabasePassword="${{ secrets.DATABASE_PASSWORD }}"
+          FrontendOrigin="${{ vars.FRONTEND_ORIGIN }}"
+          GithubTokenEncryptionKey="${{ secrets.TOKEN_ENCRYPTION_KEY }}"

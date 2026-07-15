@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783077343565,
+      "tag": "0000_living_network",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783180000000,
+      "tag": "0001_github_integration",
+      "breakpoints": true
+    }
+  ]
+}
