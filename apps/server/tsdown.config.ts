@@ -13,7 +13,7 @@ export default defineConfig({
 	outDir: "./dist",
 	clean: true,
 	deps: {
-		alwaysBundle: [/@jy-aigc\/.*/, "pg"],
+		alwaysBundle: [/./],
 		onlyBundle: false,
 	},
 });
