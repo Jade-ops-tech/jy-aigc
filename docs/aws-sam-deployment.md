@@ -30,7 +30,7 @@ AWS 中的 `jy-aigc-github-oidc` 栈已经创建：
 - IAM Role：`arn:aws:iam::853086872016:role/jy-aigc-github-deploy-role`
 - 信任范围：仅 `Jade-ops-tech/jy-aigc` 仓库的 `main` 分支
 
-在 GitHub 仓库的 `Settings -> Environments -> production` 中配置：
+在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 中配置：
 
 Variables：
 
