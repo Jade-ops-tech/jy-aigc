@@ -1,4 +1,4 @@
-name: Deploy AWS SAM
+name: Deploy application
 
 on:
   push:
@@ -15,8 +15,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  deploy_backend:
     runs-on: ubuntu-latest
+    outputs:
+      api_url: ${{ steps.stack_output.outputs.api_url }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -69,3 +71,48 @@ jobs:
           DatabasePassword="${{ secrets.DATABASE_PASSWORD }}"
           FrontendOrigin="${{ vars.FRONTEND_ORIGIN }}"
           GithubTokenEncryptionKey="${{ secrets.TOKEN_ENCRYPTION_KEY }}"
+
+      - name: Read API URL
+        id: stack_output
+        run: |
+          api_url="$(aws cloudformation describe-stacks \
+            --stack-name jy-aigc-production \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' \
+            --output text)"
+          echo "api_url=${api_url}" >> "$GITHUB_OUTPUT"
+
+  deploy_frontend:
+    needs: deploy_backend
+    if: ${{ vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT != '' }}
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm --filter web build
+        env:
+          VITE_SERVER_URL: ${{ needs.deploy_backend.outputs.api_url }}
+
+      - name: Deploy Cloudflare Pages
+        run: >-
+          pnpm exec wrangler pages deploy apps/web/dist
+          --project-name="${{ vars.CLOUDFLARE_PAGES_PROJECT }}"
+          --branch=main
