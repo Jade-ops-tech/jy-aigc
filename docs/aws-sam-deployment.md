@@ -39,14 +39,11 @@ Variables：
 - `AWS_DEPLOY_ROLE_ARN` = `arn:aws:iam::853086872016:role/jy-aigc-github-deploy-role`
 - `AWS_REGION` = `us-west-2`
 - `FRONTEND_ORIGIN` = 前端实际地址；仅从本机访问时可暂用 `http://localhost:3001`
-- `CLOUDFLARE_ACCOUNT_ID` = Cloudflare 账号 ID
-- `CLOUDFLARE_PAGES_PROJECT` = Pages 项目名，例如 `jy-aigc`
 
 Secrets：
 
 - `DATABASE_PASSWORD` = 现有 Aurora `postgres` 用户密码
 - `TOKEN_ENCRYPTION_KEY` = 项目本地已有的 `GITHUB_TOKEN_ENCRYPTION_KEY` 值（GitHub 禁止自定义 Secret 名称以 `GITHUB_` 开头）
-- `CLOUDFLARE_API_TOKEN` = 具有 Cloudflare Pages 编辑权限的 API Token
 
 不要把上述两个 Secret 写入 YAML、SAM 配置或 Git。
 
@@ -59,8 +56,7 @@ Secrets：
 3. 通过 GitHub OIDC 获取短期 AWS 凭据。
 4. 校验、构建并部署 SAM 后端应用。
 5. 首次创建/更新时，由迁移 Lambda 执行尚未应用的 Drizzle migrations。
-6. 读取 API Gateway URL，以 `VITE_SERVER_URL` 注入前端构建。
-7. 使用 Wrangler Direct Upload 将 `apps/web/dist` 部署到 Cloudflare Pages。
+Cloudflare Pages 通过 GitHub 集成独立部署前端：生产分支为 `main`，构建命令为 `pnpm --filter web build`，输出目录为 `apps/web/dist`，环境变量 `VITE_SERVER_URL` 指向 SAM 输出的 API Gateway URL。
 
 ## 本地校验与删除
 
