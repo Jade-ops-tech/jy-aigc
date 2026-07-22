@@ -67,7 +67,10 @@ token 作为纯文本存入 AWS Secrets Manager，例如：
 jy-aigc/pr-preview/cloudflare-api-token
 ```
 
-不要把 token 写入参数文件、Git 或构建日志。
+Secrets Manager 必须选择 `Plaintext` 并只保存 token 本身；不要保存成
+`{"API_TOKEN_CLOUDFLARE":"..."}` 这类 JSON 键值，否则 Wrangler 会把整段 JSON
+当作 token 并返回 Cloudflare `9106` 鉴权错误。不要把 token 写入参数文件、Git 或
+构建日志。
 
 ### 3. 调整 Cloudflare Preview 构建
 
