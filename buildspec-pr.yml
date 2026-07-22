@@ -5,6 +5,8 @@ env:
 
 phases:
   install:
+    runtime-versions:
+      nodejs: 22
     commands:
       - corepack enable
       - corepack prepare pnpm@11.7.0 --activate
