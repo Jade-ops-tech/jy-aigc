@@ -64,6 +64,8 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
 
+  apps/go-api: {}
+
   apps/server:
     dependencies:
       '@hono/node-server':

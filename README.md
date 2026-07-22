@@ -1,6 +1,9 @@
 # jy-aigc
 
-AWS 部署说明见 [docs/aws-sam-deployment.md](docs/aws-sam-deployment.md)。
+AWS 部署说明：
+
+- Node Lambda：[docs/aws-sam-deployment.md](docs/aws-sam-deployment.md)
+- Go ECS/Fargate：[docs/go-ecs-deployment.md](docs/go-ecs-deployment.md)
 
 This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Router, Hono, TRPC, and more.
 
@@ -13,6 +16,7 @@ This project was created with [Better-T-Stack](https://github.com/AmanVarshney01
 - **Hono** - Lightweight, performant server framework
 - **tRPC** - End-to-end type-safe APIs
 - **Node.js** - Runtime environment
+- **Go API** - Incrementally migrated REST endpoints backed by PostgreSQL
 - **Drizzle** - TypeScript-first ORM
 - **PostgreSQL** - Database engine
 - **Authentication** - Better-Auth
@@ -56,6 +60,9 @@ pnpm run dev
 
 Open [http://localhost:3001](http://localhost:3001) in your browser to see the web application.
 The API is running at [http://localhost:3000](http://localhost:3000).
+The Go API runs at [http://localhost:3002](http://localhost:3002) after copying
+`apps/go-api/.env.example` to `apps/go-api/.env` and setting the same database
+connection used by the Node server.
 
 ## UI Customization
 
@@ -94,6 +101,7 @@ jy-aigc/
 ├── apps/
 │   ├── web/         # Frontend application (React + TanStack Router)
 │   ├── docs/        # Documentation site (Astro Starlight)
+│   ├── go-api/      # Go REST API for migrated endpoints
 │   └── server/      # Backend API (Hono, TRPC)
 ├── packages/
 │   ├── ui/          # Shared shadcn/ui components and styles
@@ -108,6 +116,7 @@ jy-aigc/
 - `pnpm run build`: Build all applications
 - `pnpm run dev:web`: Start only the web application
 - `pnpm run dev:server`: Start only the server
+- `pnpm run dev:go`: Start only the Go API
 - `pnpm run check-types`: Check TypeScript types across all apps
 - `pnpm run db:push`: Push schema changes to database
 - `pnpm run db:generate`: Generate database client/types

@@ -1,0 +1,646 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Go API on ECS Fargate behind an ALB with Cloud Map discovery for Lambda.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: jy-aigc
+    AllowedPattern: "[a-z0-9-]+"
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: "[a-z0-9-]+"
+  ImageUri:
+    Type: String
+    MinLength: 1
+    Description: Immutable ECR image URI including a tag or digest.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two public subnets in different Availability Zones for the ALB.
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets with NAT or the VPC endpoints required by Fargate.
+  PrivateRouteTableIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Private route tables used by the optional S3 gateway endpoint.
+  CreatePrivateEndpoints:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Create ECR, Logs, Secrets Manager and S3 endpoints for NAT-free private tasks.
+  AssignPublicIp:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Use ENABLED only when tasks run in public subnets for a temporary environment.
+  DatabaseUrlSecretArn:
+    Type: String
+    MinLength: 1
+    Description: Secrets Manager ARN whose secret value is the complete PostgreSQL URL.
+  DatabaseSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Optional Aurora/RDS security group. Leave empty for an external database.
+  DatabaseCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Outbound database CIDR used only when DatabaseSecurityGroupId is empty.
+  DatabasePort:
+    Type: Number
+    Default: 5432
+    MinValue: 1
+    MaxValue: 65535
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:3001
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: Optional ACM certificate ARN. When set, HTTP redirects to HTTPS.
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+  ContainerPort:
+    Type: Number
+    Default: 3002
+    MinValue: 1
+    MaxValue: 65535
+  TaskCpu:
+    Type: String
+    Default: "256"
+    AllowedValues: ["256", "512", "1024"]
+  TaskMemory:
+    Type: String
+    Default: "512"
+    AllowedValues: ["512", "1024", "2048"]
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  HasDatabaseSecurityGroup: !Not [!Equals [!Ref DatabaseSecurityGroupId, ""]]
+  ShouldCreatePrivateEndpoints: !Equals [!Ref CreatePrivateEndpoints, "true"]
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ProjectName}-${EnvironmentName}"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}/${EnvironmentName}/go-api"
+      RetentionInDays: 14
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: read-database-url
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseUrlSecretArn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP access to the Go API ALB.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          DestinationSecurityGroupId: !Ref ServiceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-alb"
+
+  LoadBalancerHttpsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasCertificate
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Inbound access from the ALB and Cloud Map Lambda only.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Pull ECR images and retrieve AWS service data through NAT or endpoints.
+        - !If
+          - HasDatabaseSecurityGroup
+          - IpProtocol: tcp
+            FromPort: !Ref DatabasePort
+            ToPort: !Ref DatabasePort
+            DestinationSecurityGroupId: !Ref DatabaseSecurityGroupId
+            Description: PostgreSQL access to Aurora or RDS.
+          - IpProtocol: tcp
+            FromPort: !Ref DatabasePort
+            ToPort: !Ref DatabasePort
+            CidrIp: !Ref DatabaseCidr
+            Description: PostgreSQL access to an external database.
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-go-api"
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Lambda access to the Go API through Cloud Map private DNS.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          DestinationSecurityGroupId: !Ref ServiceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-lambda-cloudmap"
+
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      GroupDescription: HTTPS access from Go ECS tasks to private AWS service endpoints.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-endpoints"
+
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+      SubnetIds: !Ref PrivateSubnetIds
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  EcrDockerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+      SubnetIds: !Ref PrivateSubnetIds
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      SubnetIds: !Ref PrivateSubnetIds
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      SubnetIds: !Ref PrivateSubnetIds
+      VpcEndpointType: Interface
+      VpcId: !Ref VpcId
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreatePrivateEndpoints
+    Properties:
+      RouteTableIds: !Ref PrivateRouteTableIds
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      VpcId: !Ref VpcId
+
+  ServiceIngressFromLoadBalancer:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Description: ALB traffic to the Go API.
+
+  ServiceIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: Lambda traffic discovered through Cloud Map.
+
+  DatabaseIngressFromService:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasDatabaseSecurityGroup
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroupId
+      IpProtocol: tcp
+      FromPort: !Ref DatabasePort
+      ToPort: !Ref DatabasePort
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: Go ECS tasks access PostgreSQL.
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: !Ref PublicSubnetIds
+      Type: application
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /health
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: "200"
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref VpcId
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions: !If
+        - HasCertificate
+        - - Type: redirect
+            RedirectConfig:
+              Port: "443"
+              Protocol: HTTPS
+              StatusCode: HTTP_301
+        - - Type: forward
+            TargetGroupArn: !Ref TargetGroup
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+
+  ServiceDiscoveryNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Description: !Sub "Private service discovery for ${ProjectName} ${EnvironmentName}."
+      Name: !Sub "${EnvironmentName}.${ProjectName}.internal"
+      Vpc: !Ref VpcId
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Description: Go API Fargate tasks.
+      DnsConfig:
+        DnsRecords:
+          - TTL: 10
+            Type: A
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Name: go-api
+      NamespaceId: !Ref ServiceDiscoveryNamespace
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: !Ref TaskCpu
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      Family: !Sub "${ProjectName}-${EnvironmentName}-go-api"
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: go-api
+          Essential: true
+          Image: !Ref ImageUri
+          Environment:
+            - Name: CORS_ORIGIN
+              Value: !Ref FrontendOrigin
+            - Name: DATABASE_POOL_MAX
+              Value: "4"
+            - Name: PORT
+              Value: !Ref ContainerPort
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Ref DatabaseUrlSecretArn
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Name: http
+              Protocol: tcp
+          HealthCheck:
+            Command:
+              - CMD
+              - /go-api
+              - healthcheck
+            Interval: 30
+            Retries: 3
+            StartPeriod: 20
+            Timeout: 5
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: go-api
+          ReadonlyRootFilesystem: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HttpListener
+      - ServiceIngressFromLoadBalancer
+      - ServiceIngressFromLambda
+    Properties:
+      AvailabilityZoneRebalancing: ENABLED
+      Cluster: !Ref Cluster
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      DesiredCount: !Ref DesiredCount
+      EnableECSManagedTags: true
+      HealthCheckGracePeriodSeconds: 60
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: go-api
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          SecurityGroups:
+            - !Ref ServiceSecurityGroup
+          Subnets: !Ref PrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      ServiceName: !Sub "${ProjectName}-${EnvironmentName}-go-api"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt ServiceDiscoveryService.Arn
+      TaskDefinition: !Ref TaskDefinition
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  CloudMapProbeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - arm64
+      Code:
+        ZipFile: |
+          const allowedMethods = new Set(["DELETE", "GET", "PATCH", "POST"]);
+          const todoPathPattern = /^\/api\/todos(?:\/\d+)?\/?$/;
+
+          const isAllowedPath = (path) =>
+            path.startsWith("/api/profile/") || todoPathPattern.test(path);
+
+          exports.handler = async (event) => {
+            const httpRequest = event?.requestContext?.http;
+            const isFunctionUrlRequest = Boolean(httpRequest);
+            const method = httpRequest?.method ?? "GET";
+            const path = event?.rawPath ?? "/health";
+
+            if (
+              isFunctionUrlRequest &&
+              (!allowedMethods.has(method) || !isAllowedPath(path))
+            ) {
+              return {
+                statusCode: 404,
+                headers: { "content-type": "application/json; charset=utf-8" },
+                body: JSON.stringify({ error: "not found" }),
+              };
+            }
+
+            const query = event?.rawQueryString ? `?${event.rawQueryString}` : "";
+            const serviceUrl = `${process.env.SERVICE_BASE_URL}${path}${query}`;
+            const contentType = event?.headers?.["content-type"];
+            const headers = contentType ? { "content-type": contentType } : undefined;
+            const body = event?.body
+              ? event.isBase64Encoded
+                ? Buffer.from(event.body, "base64")
+                : event.body
+              : undefined;
+            const response = await fetch(serviceUrl, {
+              body,
+              headers,
+              method,
+              signal: AbortSignal.timeout(5000),
+            });
+            return {
+              statusCode: response.status,
+              headers: {
+                "content-type":
+                  response.headers.get("content-type") ??
+                  "application/json; charset=utf-8",
+              },
+              body: await response.text(),
+            };
+          };
+      Environment:
+        Variables:
+          SERVICE_BASE_URL: !Sub "http://go-api.${EnvironmentName}.${ProjectName}.internal:${ContainerPort}"
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs22.x
+      Timeout: 10
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Ref PrivateSubnetIds
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  CloudMapApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      Cors:
+        AllowHeaders:
+          - content-type
+        AllowMethods:
+          - DELETE
+          - GET
+          - PATCH
+          - POST
+        AllowOrigins:
+          - !Ref FrontendOrigin
+        MaxAge: 3600
+      InvokeMode: BUFFERED
+      TargetFunctionArn: !GetAtt CloudMapProbeFunction.Arn
+
+  CloudMapApiFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref CloudMapProbeFunction
+      FunctionUrlAuthType: NONE
+      Principal: "*"
+
+  CloudMapApiFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CloudMapProbeFunction
+      InvokedViaFunctionUrl: true
+      Principal: "*"
+
+Outputs:
+  ApiUrl:
+    Description: Public Go API base URL. Add a DNS record before using HTTPS in production.
+    Value: !If
+      - HasCertificate
+      - !Sub "https://${LoadBalancer.DNSName}"
+      - !Sub "http://${LoadBalancer.DNSName}"
+  ClusterName:
+    Value: !Ref Cluster
+  CloudMapDnsName:
+    Value: !Sub "go-api.${EnvironmentName}.${ProjectName}.internal"
+  CloudMapProbeFunctionName:
+    Value: !Ref CloudMapProbeFunction
+  CloudMapApiUrl:
+    Description: HTTPS browser endpoint backed by Lambda and Cloud Map service discovery.
+    Value: !GetAtt CloudMapApiFunctionUrl.FunctionUrl
+  ServiceName:
+    Value: !GetAtt Service.Name
+  TargetGroupArn:
+    Value: !Ref TargetGroup

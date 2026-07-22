@@ -8,14 +8,20 @@ import {
 } from "@jy-aigc/ui/components/card";
 import { Checkbox } from "@jy-aigc/ui/components/checkbox";
 import { Input } from "@jy-aigc/ui/components/input";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import { trpc } from "@/utils/trpc";
+import {
+	createTodo,
+	deleteTodo,
+	listTodos,
+	setTodoCompleted,
+	type Todo,
+} from "@/lib/go-api";
 
-type TodoId = number;
+const TODOS_QUERY_KEY = ["go-api", "todos"] as const;
 
 export const Route = createFileRoute("/todos")({
 	component: TodosRoute,
@@ -23,44 +29,45 @@ export const Route = createFileRoute("/todos")({
 
 function TodosRoute() {
 	const [newTodoText, setNewTodoText] = useState("");
+	const queryClient = useQueryClient();
 
-	const todos = useQuery(trpc.todo.getAll.queryOptions());
-	const createMutation = useMutation(
-		trpc.todo.create.mutationOptions({
-			onSuccess: () => {
-				todos.refetch();
-				setNewTodoText("");
-			},
-		})
-	);
-	const toggleMutation = useMutation(
-		trpc.todo.toggle.mutationOptions({
-			onSuccess: () => {
-				todos.refetch();
-			},
-		})
-	);
-	const deleteMutation = useMutation(
-		trpc.todo.delete.mutationOptions({
-			onSuccess: () => {
-				todos.refetch();
-			},
-		})
-	);
+	const todos = useQuery({
+		queryFn: listTodos,
+		queryKey: TODOS_QUERY_KEY,
+	});
+	const createMutation = useMutation({
+		mutationFn: createTodo,
+		onSuccess: async () => {
+			setNewTodoText("");
+			await queryClient.invalidateQueries({ queryKey: TODOS_QUERY_KEY });
+		},
+	});
+	const toggleMutation = useMutation({
+		mutationFn: setTodoCompleted,
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({ queryKey: TODOS_QUERY_KEY });
+		},
+	});
+	const deleteMutation = useMutation({
+		mutationFn: deleteTodo,
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({ queryKey: TODOS_QUERY_KEY });
+		},
+	});
 
 	const handleAddTodo = (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		if (newTodoText.trim()) {
-			createMutation.mutate({ text: newTodoText });
+			createMutation.mutate(newTodoText);
 		}
 	};
 
-	const handleToggleTodo = (id: TodoId, completed: boolean) => {
-		toggleMutation.mutate({ id, completed: !completed });
+	const handleToggleTodo = (id: number, completed: boolean) => {
+		toggleMutation.mutate({ completed: !completed, id });
 	};
 
-	const handleDeleteTodo = (id: TodoId) => {
-		deleteMutation.mutate({ id });
+	const handleDeleteTodo = (id: number) => {
+		deleteMutation.mutate(id);
 	};
 
 	return (
@@ -68,7 +75,9 @@ function TodosRoute() {
 			<Card>
 				<CardHeader>
 					<CardTitle>Todo List</CardTitle>
-					<CardDescription>Manage your tasks efficiently</CardDescription>
+					<CardDescription>
+						These todos are served by the new Go API.
+					</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<form
@@ -93,48 +102,68 @@ function TodosRoute() {
 						</Button>
 					</form>
 
-					{todos.isLoading ? (
-						<div className="flex justify-center py-4">
-							<Loader2 className="h-6 w-6 animate-spin" />
-						</div>
-					) : todos.data?.length === 0 ? (
-						<p className="py-4 text-center">No todos yet. Add one above!</p>
-					) : (
-						<ul className="space-y-2">
-							{todos.data?.map((todo) => (
-								<li
-									className="flex items-center justify-between rounded-md border p-2"
-									key={todo.id}
-								>
-									<div className="flex items-center space-x-2">
-										<Checkbox
-											checked={todo.completed}
-											id={`todo-${todo.id}`}
-											onCheckedChange={() =>
-												handleToggleTodo(todo.id, todo.completed)
-											}
-										/>
-										<label
-											className={`${todo.completed ? "line-through" : ""}`}
-											htmlFor={`todo-${todo.id}`}
-										>
-											{todo.text}
-										</label>
-									</div>
-									<Button
-										aria-label="Delete todo"
-										onClick={() => handleDeleteTodo(todo.id)}
-										size="icon"
-										variant="ghost"
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								</li>
-							))}
-						</ul>
-					)}
+					<TodoList
+						isLoading={todos.isLoading}
+						items={todos.data}
+						onDelete={handleDeleteTodo}
+						onToggle={handleToggleTodo}
+					/>
 				</CardContent>
 			</Card>
 		</div>
+	);
+}
+
+interface TodoListProps {
+	isLoading: boolean;
+	items: Todo[] | undefined;
+	onDelete: (id: number) => void;
+	onToggle: (id: number, completed: boolean) => void;
+}
+
+function TodoList({ isLoading, items, onDelete, onToggle }: TodoListProps) {
+	if (isLoading) {
+		return (
+			<div className="flex justify-center py-4">
+				<Loader2 className="h-6 w-6 animate-spin" />
+			</div>
+		);
+	}
+
+	if (!items?.length) {
+		return <p className="py-4 text-center">No todos yet. Add one above!</p>;
+	}
+
+	return (
+		<ul className="space-y-2">
+			{items.map((todo) => (
+				<li
+					className="flex items-center justify-between rounded-md border p-2"
+					key={todo.id}
+				>
+					<div className="flex items-center space-x-2">
+						<Checkbox
+							checked={todo.completed}
+							id={`todo-${todo.id}`}
+							onCheckedChange={() => onToggle(todo.id, todo.completed)}
+						/>
+						<label
+							className={todo.completed ? "line-through" : ""}
+							htmlFor={`todo-${todo.id}`}
+						>
+							{todo.text}
+						</label>
+					</div>
+					<Button
+						aria-label="Delete todo"
+						onClick={() => onDelete(todo.id)}
+						size="icon"
+						variant="ghost"
+					>
+						<Trash2 className="h-4 w-4" />
+					</Button>
+				</li>
+			))}
+		</ul>
 	);
 }

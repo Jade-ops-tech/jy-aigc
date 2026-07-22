@@ -35,6 +35,12 @@ function FeedRoute() {
 					<div className="flex shrink-0 items-center gap-4">
 						<Link
 							className="font-ui text-[13px] text-ink-muted transition-colors hover:text-ink"
+							to="/about"
+						>
+							About
+						</Link>
+						<Link
+							className="font-ui text-[13px] text-ink-muted transition-colors hover:text-ink"
 							to="/github"
 						>
 							GitHub

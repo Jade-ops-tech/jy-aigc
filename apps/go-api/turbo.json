@@ -1,0 +1,18 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "env": [
+        "CORS_ORIGIN",
+        "DATABASE_HOST",
+        "DATABASE_NAME",
+        "DATABASE_PASSWORD",
+        "DATABASE_POOL_MAX",
+        "DATABASE_PORT",
+        "DATABASE_URL",
+        "DATABASE_USER",
+        "PORT"
+      ]
+    }
+  }
+}

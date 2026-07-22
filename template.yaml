@@ -237,5 +237,15 @@ Outputs:
   ExistingDatabaseEndpoint:
     Description: Existing Aurora cluster endpoint used by Lambda.
     Value: !Ref DatabaseEndpoint
+  ExistingDatabaseSecurityGroupId:
+    Value: !Ref ExistingDatabaseSecurityGroupId
+  LambdaSecurityGroupId:
+    Value: !Ref LambdaSecurityGroup
+  PrivateSubnetAId:
+    Value: !Ref PrivateSubnetA
+  PrivateSubnetBId:
+    Value: !Ref PrivateSubnetB
+  PublicSubnetId:
+    Value: !Ref PublicSubnetId
   VpcId:
     Value: !Ref ExistingVpcId
