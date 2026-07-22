@@ -195,6 +195,10 @@ Resources:
                   - logs:PutRetentionPolicy
                   - logs:TagResource
                   - logs:UntagResource
+                  - route53:CreateHostedZone
+                  - route53:DeleteHostedZone
+                  - route53:GetHostedZone
+                  - route53:ListHostedZonesByName
                   - servicediscovery:*
                 Resource: "*"
               - Sid: ManagePreviewRuntimeRoles
