@@ -13,14 +13,6 @@ Parameters:
     Type: String
     MinLength: 1
     Description: An AVAILABLE AWS CodeConnections GitHub App connection ARN.
-  PullRequestActorAccountId:
-    Type: String
-    AllowedPattern: "[0-9]+"
-    Description: Numeric GitHub account ID allowed to trigger privileged PR builds.
-  BaseBranch:
-    Type: String
-    Default: main
-    AllowedPattern: "[A-Za-z0-9._/-]+"
   EcrRepositoryName:
     Type: String
     Default: jy-aigc/go-api
@@ -307,15 +299,6 @@ Resources:
         ReportBuildStatus: true
         Type: GITHUB
       TimeoutInMinutes: 60
-      Triggers:
-        Webhook: true
-        FilterGroups:
-          - - Type: EVENT
-              Pattern: PULL_REQUEST_CREATED,PULL_REQUEST_UPDATED,PULL_REQUEST_REOPENED,PULL_REQUEST_MERGED,PULL_REQUEST_CLOSED
-            - Type: BASE_REF
-              Pattern: !Sub "^refs/heads/${BaseBranch}$"
-            - Type: ACTOR_ACCOUNT_ID
-              Pattern: !Ref PullRequestActorAccountId
       Tags:
         - Key: Project
           Value: !Ref ProjectName
