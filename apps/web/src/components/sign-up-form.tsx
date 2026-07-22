@@ -16,7 +16,7 @@ export default function SignUpForm({
 	onSwitchToSignIn: () => void;
 }) {
 	const navigate = useNavigate({
-		from: "/",
+		from: "/login",
 	});
 	const { isPending } = authClient.useSession();
 
@@ -36,7 +36,7 @@ export default function SignUpForm({
 				{
 					onSuccess: () => {
 						navigate({
-							to: "/",
+							to: "/journal",
 						});
 						toast.success("Sign up successful");
 					},

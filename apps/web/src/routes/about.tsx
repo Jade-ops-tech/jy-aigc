@@ -37,7 +37,7 @@ function AboutRoute() {
 				<header className="flex items-center justify-between gap-4">
 					<Link
 						className="inline-flex items-center gap-2 text-[13px] text-ink-muted transition-colors hover:text-ink"
-						to="/"
+						to="/journal"
 					>
 						<ArrowLeft aria-hidden="true" className="size-4" />
 						Daily Musings

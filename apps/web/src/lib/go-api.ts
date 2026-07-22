@@ -15,11 +15,14 @@ interface ApiErrorResponse {
 	error?: string;
 }
 
+const TRAILING_SLASHES_PATTERN = /\/+$/;
+const goApiBaseUrl = env.VITE_GO_API_URL.replace(TRAILING_SLASHES_PATTERN, "");
+
 const requestJSON = async <ResponseBody>(
 	path: string,
 	init?: RequestInit
 ): Promise<ResponseBody> => {
-	const response = await fetch(`${env.VITE_GO_API_URL}${path}`, init);
+	const response = await fetch(`${goApiBaseUrl}${path}`, init);
 	if (!response.ok) {
 		let message = `Go API request failed with status ${response.status}`;
 		try {
@@ -54,7 +57,7 @@ export const setTodoCompleted = ({
 	});
 
 export const deleteTodo = async (id: number): Promise<void> => {
-	const response = await fetch(`${env.VITE_GO_API_URL}/api/todos/${id}`, {
+	const response = await fetch(`${goApiBaseUrl}/api/todos/${id}`, {
 		method: "DELETE",
 	});
 	if (!response.ok) {

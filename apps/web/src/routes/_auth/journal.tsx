@@ -9,7 +9,7 @@ import Loader from "@/components/loader";
 import { authClient } from "@/lib/auth-client";
 import { trpc } from "@/utils/trpc";
 
-export const Route = createFileRoute("/_auth/")({
+export const Route = createFileRoute("/_auth/journal")({
 	component: FeedRoute,
 });
 

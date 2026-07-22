@@ -1,19 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
 
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 
 export const Route = createFileRoute("/login")({
 	component: RouteComponent,
+	validateSearch: (
+		search: Record<string, unknown>
+	): { mode?: "sign-in" | "sign-up" } => {
+		if (search.mode === "sign-in" || search.mode === "sign-up") {
+			return { mode: search.mode };
+		}
+
+		return {};
+	},
 });
 
 function RouteComponent() {
-	const [showSignIn, setShowSignIn] = useState(false);
+	const { mode } = Route.useSearch();
+	const navigate = Route.useNavigate();
 
-	return showSignIn ? (
-		<SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
+	return mode === "sign-in" ? (
+		<SignInForm
+			onSwitchToSignUp={() => navigate({ search: { mode: "sign-up" } })}
+		/>
 	) : (
-		<SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
+		<SignUpForm
+			onSwitchToSignIn={() => navigate({ search: { mode: "sign-in" } })}
+		/>
 	);
 }
