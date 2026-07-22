@@ -68,7 +68,7 @@ function GithubRoute() {
 					<div className="flex flex-col gap-1">
 						<Link
 							className="font-ui text-[13px] text-ink-muted transition-colors hover:text-ink"
-							to="/"
+							to="/journal"
 						>
 							返回记录
 						</Link>

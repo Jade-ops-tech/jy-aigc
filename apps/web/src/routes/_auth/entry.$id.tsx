@@ -24,7 +24,7 @@ function EditEntryRoute() {
 		await queryClient.invalidateQueries({
 			queryKey: trpc.journal.list.queryKey(),
 		});
-		navigate({ to: "/" });
+		navigate({ to: "/journal" });
 	};
 
 	const updateMutation = useMutation(
@@ -54,7 +54,7 @@ function EditEntryRoute() {
 				</p>
 				<Link
 					className="self-center rounded-full bg-brand px-6 py-2.5 font-ui text-[14px] text-canvas transition-opacity hover:opacity-90"
-					to="/"
+					to="/journal"
 				>
 					回到首页
 				</Link>
@@ -73,7 +73,7 @@ function EditEntryRoute() {
 				isDeleting={deleteMutation.isPending}
 				isSaving={updateMutation.isPending}
 				mode="edit"
-				onCancel={() => navigate({ to: "/" })}
+				onCancel={() => navigate({ to: "/journal" })}
 				onDelete={() => deleteMutation.mutate({ id })}
 				onSave={({ body, mood }) => updateMutation.mutate({ id, body, mood })}
 			/>

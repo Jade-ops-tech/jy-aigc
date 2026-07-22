@@ -25,14 +25,14 @@ function NewEntryRoute() {
 				await queryClient.invalidateQueries({
 					queryKey: trpc.journal.list.queryKey(),
 				});
-				navigate({ to: "/" });
+				navigate({ to: "/journal" });
 			},
 		})
 	);
 
 	const goHome = () => {
 		clearDraft();
-		navigate({ to: "/" });
+		navigate({ to: "/journal" });
 	};
 
 	return (
