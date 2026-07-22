@@ -1,0 +1,123 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - corepack enable
+      - corepack prepare pnpm@11.7.0 --activate
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        PR_NUMBER="${CODEBUILD_WEBHOOK_TRIGGER#pr/}"
+        if [[ ! "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+          echo "Expected CODEBUILD_WEBHOOK_TRIGGER=pr/<number>, got: ${CODEBUILD_WEBHOOK_TRIGGER:-unset}" >&2
+          exit 1
+        fi
+
+        STACK_NAME="${PROJECT_NAME}-go-pr-${PR_NUMBER}"
+        SESSION_NAME="pr-${PR_NUMBER}-${CODEBUILD_BUILD_NUMBER}"
+
+        if [[ "${CODEBUILD_WEBHOOK_EVENT}" == "PULL_REQUEST_CLOSED" || "${CODEBUILD_WEBHOOK_EVENT}" == "PULL_REQUEST_MERGED" ]]; then
+          read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "$(
+            aws sts assume-role \
+              --role-arn "${PR_DEPLOY_ROLE_ARN}" \
+              --role-session-name "${SESSION_NAME}" \
+              --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+              --output text
+          )"
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+          if aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}"
+            echo "Deleted AWS preview environment ${STACK_NAME}."
+          else
+            echo "AWS preview environment ${STACK_NAME} is already absent."
+          fi
+          exit 0
+        fi
+
+        COMMIT_SHA="${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+        IMAGE_TAG="pr-${PR_NUMBER}-${COMMIT_SHA:0:12}"
+        IMAGE_URI="${ECR_REPOSITORY_URI}:${IMAGE_TAG}"
+        BRANCH_NAME="${CODEBUILD_WEBHOOK_HEAD_REF#refs/heads/}"
+        BRANCH_ALIAS="$(printf '%s' "${BRANCH_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')"
+        FRONTEND_ORIGIN="https://${BRANCH_ALIAS}.${CLOUDFLARE_PAGES_PROJECT}.pages.dev"
+
+        aws ecr get-login-password | docker login \
+          --username AWS \
+          --password-stdin "${ECR_REPOSITORY_URI%/*}"
+        if aws ecr describe-images \
+          --repository-name "${ECR_REPOSITORY_URI#*/}" \
+          --image-ids imageTag="${IMAGE_TAG}" >/dev/null 2>&1; then
+          echo "Reusing existing immutable image ${IMAGE_URI}."
+        else
+          docker build \
+            --provenance=false \
+            --tag "${IMAGE_URI}" \
+            apps/go-api
+          docker push "${IMAGE_URI}"
+        fi
+
+        read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN <<< "$(
+          aws sts assume-role \
+            --role-arn "${PR_DEPLOY_ROLE_ARN}" \
+            --role-session-name "${SESSION_NAME}" \
+            --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+            --output text
+        )"
+        export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+        aws cloudformation deploy \
+          --stack-name "${STACK_NAME}" \
+          --template-file infra/go-ecs.yaml \
+          --role-arn "${PR_CLOUDFORMATION_ROLE_ARN}" \
+          --capabilities CAPABILITY_IAM \
+          --no-fail-on-empty-changeset \
+          --parameter-overrides \
+            ProjectName="${PROJECT_NAME}" \
+            EnvironmentName="pr-${PR_NUMBER}" \
+            ImageUri="${IMAGE_URI}" \
+            VpcId="${VPC_ID}" \
+            PublicSubnetIds="${PUBLIC_SUBNET_IDS}" \
+            PrivateSubnetIds="${TASK_SUBNET_IDS}" \
+            CreatePrivateEndpoints=false \
+            AssignPublicIp="${ASSIGN_PUBLIC_IP}" \
+            DatabaseUrlSecretArn="${DATABASE_URL_SECRET_ARN}" \
+            DatabaseCidr="${DATABASE_CIDR}" \
+            FrontendOrigin="${FRONTEND_ORIGIN}" \
+            DesiredCount=1
+
+        GO_API_URL="$(
+          aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`CloudMapApiUrl`].OutputValue' \
+            --output text
+        )"
+
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+        pnpm install --frozen-lockfile
+        VITE_GO_API_URL="${GO_API_URL}" \
+          VITE_SERVER_URL="${WEB_SERVER_URL}" \
+          pnpm --filter web build
+
+        pnpm dlx wrangler@4 pages deploy apps/web/dist \
+          --project-name "${CLOUDFLARE_PAGES_PROJECT}" \
+          --branch "${BRANCH_NAME}" \
+          --commit-hash "${COMMIT_SHA}" \
+          --commit-dirty=false
+
+        echo "AWS stack: ${STACK_NAME}"
+        echo "Go API: ${GO_API_URL}"
+        echo "Cloudflare preview: ${FRONTEND_ORIGIN}"
+
+cache:
+  paths:
+    - /root/.local/share/pnpm/store/**/*

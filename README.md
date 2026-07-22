@@ -4,6 +4,7 @@ AWS 部署说明：
 
 - Node Lambda：[docs/aws-sam-deployment.md](docs/aws-sam-deployment.md)
 - Go ECS/Fargate：[docs/go-ecs-deployment.md](docs/go-ecs-deployment.md)
+- Go PR 独立环境：[docs/go-pr-preview.md](docs/go-pr-preview.md)
 
 This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Router, Hono, TRPC, and more.
 
